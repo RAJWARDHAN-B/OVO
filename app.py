@@ -1,5 +1,5 @@
 import streamlit as st
-from omr_evaluator import evaluate_batch
+from omr_eval import evaluate_batch
 import pandas as pd
 
 st.title("OMR Evaluation MVP (Multiple Sets)")

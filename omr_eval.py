@@ -89,8 +89,7 @@ def evaluate_sheet(image_path, answer_keys, version):
     }
 
 def evaluate_batch(folder="sheets"):
-    with open("answer_keys.json") as f:
-        keys = json.load(f)
+    keys = generate_answer_key(folder)
     results = []
 
     # Loop through subfolders (setA, setB)
@@ -103,3 +102,45 @@ def evaluate_batch(folder="sheets"):
                     res = evaluate_sheet(os.path.join(set_path,fname), keys, version)
                     results.append(res)
     return results
+
+
+def generate_answer_key(folder="sheets"):
+    import cv2
+    import numpy as np
+    import os
+    import pandas as pd
+    """
+    Generate answer key XLSX from training images in setA/setB folders.
+    """
+    key_dict = {}
+    for set_folder in os.listdir(folder):
+        set_path = os.path.join(folder, set_folder)
+        if os.path.isdir(set_path):
+            version = "A" if "A" in set_folder.upper() else "B"
+            all_answers = []
+
+            for fname in os.listdir(set_path):
+                if fname.lower().endswith((".jpg",".png")):
+                    img_path = os.path.join(set_path, fname)
+                    img = cv2.imread(img_path)
+                    warp = rectify_image(img)
+                    answers = extract_answers(warp, version)
+                    all_answers.append(answers)
+
+            all_answers = np.array(all_answers)
+            consensus = []
+            for q_answers in all_answers.T:
+                vals, counts = np.unique(q_answers[q_answers != ""], return_counts=True)
+                if len(vals) == 0:
+                    consensus.append("")  # no mark detected
+                else:
+                    consensus.append(vals[np.argmax(counts)])
+            key_dict[version] = consensus
+
+    df_data = []
+    for version, answers in key_dict.items():
+        df_data.append([version]+answers)
+    df = pd.DataFrame(df_data, columns=["Version"] + [f"Q{i+1}" for i in range(100)])
+    df.to_excel("generated_answer_key.xlsx", index=False)
+    print("Answer key saved as 'generated_answer_key.xlsx'")
+    return key_dict
