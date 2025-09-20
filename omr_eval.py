@@ -225,18 +225,18 @@ def rectify_image(img):
 # ------------------- Answer Extraction -------------------
 def extract_answers(img):
     """
-    Extract answers per subject.
+    Extract answers per subject with improved detection.
     Returns: {'Python': [...], 'EDA': [...], ...}
     """
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     answers = {subj: [] for subj in SUBJECTS}
 
-    # Adjust these coordinates based on your OMR template
-    # Assuming 5 subjects in columns, 20 questions in rows
-    start_x, start_y = 100, 200  # Starting position
-    bubble_w, bubble_h = 30, 30  # Bubble size
-    spacing_x, spacing_y = 200, 30  # Spacing between subjects and questions
-    choice_spacing = 50  # Spacing between A/B/C/D choices
+    # Enhanced parameters based on typical OMR layout
+    # These coordinates need to be adjusted based on your specific OMR template
+    start_x, start_y = 150, 250  # Starting position
+    bubble_w, bubble_h = 25, 25  # Bubble size
+    spacing_x, spacing_y = 180, 35  # Spacing between subjects and questions
+    choice_spacing = 40  # Spacing between A/B/C/D choices
 
     for s_idx, subj in enumerate(SUBJECTS):
         for q_idx in range(QUESTIONS_PER_SUBJECT):
@@ -248,19 +248,24 @@ def extract_answers(img):
             choice_scores = []
             for choice_idx in range(4):  # A, B, C, D
                 choice_x = x + choice_idx * choice_spacing
-                roi = gray[y:y+bubble_h, choice_x:choice_x+bubble_w]
                 
-                if roi.size == 0 or roi.shape[0] != bubble_h or roi.shape[1] != bubble_w:  # Skip if ROI is empty or wrong size
+                # Ensure we don't go out of bounds
+                if choice_x + bubble_w > gray.shape[1] or y + bubble_h > gray.shape[0]:
                     choice_scores.append(0)
                     continue
                     
-                mask = create_circular_mask(roi.shape[0], roi.shape[1])
-                _, th = cv2.threshold(roi, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-                score = np.sum((th==0) & mask) / np.sum(mask) if np.sum(mask) > 0 else 0
+                roi = gray[y:y+bubble_h, choice_x:choice_x+bubble_w]
+                
+                if roi.size == 0 or roi.shape[0] != bubble_h or roi.shape[1] != bubble_w:
+                    choice_scores.append(0)
+                    continue
+                
+                # Enhanced bubble detection
+                score = detect_bubble_marking(roi)
                 choice_scores.append(score)
             
             # Find the choice with highest score (most marked)
-            if max(choice_scores) > 0.3:  # Threshold for detection
+            if max(choice_scores) > 0.15:  # Lowered threshold for better detection
                 choice_idx = np.argmax(choice_scores)
                 choice = chr(ord('a') + choice_idx)  # Convert to a, b, c, d
             else:
@@ -269,11 +274,273 @@ def extract_answers(img):
             answers[subj].append(choice)
     return answers
 
+def detect_bubble_marking(roi):
+    """
+    Enhanced bubble detection using multiple techniques.
+    """
+    if roi.size == 0:
+        return 0
+    
+    # Method 1: Circular mask with adaptive thresholding
+    mask = create_circular_mask(roi.shape[0], roi.shape[1])
+    
+    # Use adaptive thresholding for better detection
+    adaptive_thresh = cv2.adaptiveThreshold(roi, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
+                                          cv2.THRESH_BINARY_INV, 11, 2)
+    
+    # Count dark pixels within the circular mask
+    dark_pixels = np.sum((adaptive_thresh == 255) & mask)
+    total_pixels = np.sum(mask)
+    
+    if total_pixels == 0:
+        return 0
+    
+    score1 = dark_pixels / total_pixels
+    
+    # Method 2: Otsu thresholding
+    _, otsu_thresh = cv2.threshold(roi, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+    dark_pixels_otsu = np.sum((otsu_thresh == 255) & mask)
+    score2 = dark_pixels_otsu / total_pixels if total_pixels > 0 else 0
+    
+    # Method 3: Mean intensity (darker = more marked)
+    mean_intensity = np.mean(roi[mask])
+    score3 = (255 - mean_intensity) / 255
+    
+    # Method 4: Contour detection
+    contours, _ = cv2.findContours(otsu_thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    contour_area = 0
+    for contour in contours:
+        if cv2.contourArea(contour) > 10:  # Filter small noise
+            contour_area += cv2.contourArea(contour)
+    score4 = min(contour_area / (roi.shape[0] * roi.shape[1]), 1.0)
+    
+    # Combine all methods with weights
+    final_score = (score1 * 0.4 + score2 * 0.3 + score3 * 0.2 + score4 * 0.1)
+    
+    return final_score
+
+# ------------------- Auto-detect OMR Layout -------------------
+def detect_omr_layout(img):
+    """
+    Automatically detect OMR bubble positions using computer vision.
+    """
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    
+    # Use HoughCircles to detect circular bubbles
+    circles = cv2.HoughCircles(gray, cv2.HOUGH_GRADIENT, 1, 20,
+                              param1=50, param2=30, minRadius=8, maxRadius=20)
+    
+    if circles is not None:
+        circles = np.round(circles[0, :]).astype("int")
+        
+        # Group circles by rows and columns
+        # Sort by y-coordinate first (rows), then by x-coordinate (columns)
+        circles = sorted(circles, key=lambda x: (x[1], x[0]))
+        
+        # Find the pattern - assuming 5 subjects x 20 questions x 4 choices
+        bubble_positions = []
+        current_row = []
+        last_y = circles[0][1] if len(circles) > 0 else 0
+        
+        for (x, y, r) in circles:
+            if abs(y - last_y) > 20:  # New row
+                if current_row:
+                    bubble_positions.append(current_row)
+                current_row = [(x, y, r)]
+            else:
+                current_row.append((x, y, r))
+            last_y = y
+        
+        if current_row:
+            bubble_positions.append(current_row)
+        
+        return bubble_positions
+    
+    return None
+
+def extract_answers_auto(img):
+    """
+    Extract answers using auto-detected bubble positions.
+    """
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    answers = {subj: [] for subj in SUBJECTS}
+    
+    # Auto-detect bubble positions
+    bubble_positions = detect_omr_layout(img)
+    
+    if bubble_positions is None or len(bubble_positions) < 20:
+        print("Could not auto-detect OMR layout, falling back to manual coordinates")
+        return extract_answers(img)
+    
+    # Process detected bubbles
+    for q_idx in range(min(20, len(bubble_positions))):
+        row_bubbles = bubble_positions[q_idx]
+        
+        # Sort bubbles in this row by x-coordinate
+        row_bubbles = sorted(row_bubbles, key=lambda x: x[0])
+        
+        # Group bubbles by subject (assuming 4 bubbles per subject)
+        for s_idx in range(5):  # 5 subjects
+            if s_idx * 4 + 3 < len(row_bubbles):
+                # Get 4 bubbles for this subject
+                subject_bubbles = row_bubbles[s_idx * 4:(s_idx + 1) * 4]
+                
+                # Check which bubble is marked
+                choice_scores = []
+                for choice_idx, (x, y, r) in enumerate(subject_bubbles):
+                    # Extract ROI around the bubble
+                    roi = gray[y-r:y+r, x-r:x+r]
+                    if roi.size > 0:
+                        score = detect_bubble_marking(roi)
+                        choice_scores.append(score)
+                    else:
+                        choice_scores.append(0)
+                
+                # Find the most marked choice
+                if max(choice_scores) > 0.15:
+                    choice_idx = np.argmax(choice_scores)
+                    choice = chr(ord('a') + choice_idx)
+                else:
+                    choice = ""
+                
+                answers[SUBJECTS[s_idx]].append(choice)
+            else:
+                # Not enough bubbles for this subject
+                answers[SUBJECTS[s_idx]].append("")
+    
+    return answers
+
+# ------------------- Calibration Helper -------------------
+def calibrate_omr_coordinates(image_path, save_debug_image=True):
+    """
+    Helper function to visualize and calibrate OMR coordinates.
+    This will help find the correct positions for bubbles.
+    """
+    img = cv2.imread(image_path)
+    if img is None:
+        print(f"Could not load image: {image_path}")
+        return
+    
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    debug_img = img.copy()
+    
+    # Multiple coordinate sets to try
+    coordinate_sets = [
+        # Set 1: Original coordinates
+        {"start_x": 150, "start_y": 250, "bubble_w": 25, "bubble_h": 25, 
+         "spacing_x": 180, "spacing_y": 35, "choice_spacing": 40, "color": (0, 255, 0)},
+        
+        # Set 2: Adjusted coordinates
+        {"start_x": 200, "start_y": 300, "bubble_w": 30, "bubble_h": 30, 
+         "spacing_x": 200, "spacing_y": 40, "choice_spacing": 45, "color": (255, 0, 0)},
+        
+        # Set 3: Alternative layout
+        {"start_x": 100, "start_y": 200, "bubble_w": 20, "bubble_h": 20, 
+         "spacing_x": 160, "spacing_y": 30, "choice_spacing": 35, "color": (0, 0, 255)},
+    ]
+    
+    for coord_set in coordinate_sets:
+        start_x = coord_set["start_x"]
+        start_y = coord_set["start_y"]
+        bubble_w = coord_set["bubble_w"]
+        bubble_h = coord_set["bubble_h"]
+        spacing_x = coord_set["spacing_x"]
+        spacing_y = coord_set["spacing_y"]
+        choice_spacing = coord_set["choice_spacing"]
+        color = coord_set["color"]
+        
+        # Draw rectangles to show where we're looking for bubbles
+        for s_idx in range(5):  # 5 subjects
+            for q_idx in range(20):  # 20 questions per subject
+                x = start_x + s_idx * spacing_x
+                y = start_y + q_idx * spacing_y
+                
+                for choice_idx in range(4):  # A, B, C, D
+                    choice_x = x + choice_idx * choice_spacing
+                    
+                    if (choice_x + bubble_w < gray.shape[1] and 
+                        y + bubble_h < gray.shape[0]):
+                        
+                        # Draw rectangle around bubble area
+                        cv2.rectangle(debug_img, 
+                                    (choice_x, y), 
+                                    (choice_x + bubble_w, y + bubble_h), 
+                                    color, 1)
+                        
+                        # Add text label for first few questions only
+                        if q_idx < 3 and s_idx < 2:
+                            cv2.putText(debug_img, f"{chr(ord('A') + choice_idx)}", 
+                                      (choice_x, y - 5), cv2.FONT_HERSHEY_SIMPLEX, 
+                                      0.3, color, 1)
+    
+    if save_debug_image:
+        cv2.imwrite("debug_omr_coordinates.jpg", debug_img)
+        print("Debug image saved as 'debug_omr_coordinates.jpg'")
+        print("Check the image to see if any colored rectangles align with the bubbles")
+        print("Green = Set 1, Red = Set 2, Blue = Set 3")
+    
+    return debug_img
+
+def test_coordinate_sets(image_path):
+    """
+    Test different coordinate sets to find the best one.
+    """
+    img = cv2.imread(image_path)
+    if img is None:
+        print(f"Could not load image: {image_path}")
+        return
+    
+    warp = rectify_image(img)
+    keyA, keyB = load_keys()
+    
+    # Test different coordinate sets
+    coordinate_sets = [
+        {"start_x": 150, "start_y": 250, "bubble_w": 25, "bubble_h": 25, 
+         "spacing_x": 180, "spacing_y": 35, "choice_spacing": 40},
+        {"start_x": 200, "start_y": 300, "bubble_w": 30, "bubble_h": 30, 
+         "spacing_x": 200, "spacing_y": 40, "choice_spacing": 45},
+        {"start_x": 100, "start_y": 200, "bubble_w": 20, "bubble_h": 20, 
+         "spacing_x": 160, "spacing_y": 30, "choice_spacing": 35},
+    ]
+    
+    best_score = 0
+    best_coords = None
+    
+    for i, coords in enumerate(coordinate_sets):
+        # Temporarily update global coordinates
+        global start_x, start_y, bubble_w, bubble_h, spacing_x, spacing_y, choice_spacing
+        start_x, start_y = coords["start_x"], coords["start_y"]
+        bubble_w, bubble_h = coords["bubble_w"], coords["bubble_h"]
+        spacing_x, spacing_y = coords["spacing_x"], coords["spacing_y"]
+        choice_spacing = coords["choice_spacing"]
+        
+        # Test extraction
+        extracted = extract_answers(warp)
+        total_correct = 0
+        for subj in SUBJECTS:
+            correct = sum([1 for a,b in zip(extracted[subj], keyA[subj]) if a==b])
+            total_correct += correct
+        
+        print(f"Coordinate Set {i+1}: {total_correct} correct answers")
+        if total_correct > best_score:
+            best_score = total_correct
+            best_coords = coords
+    
+    print(f"Best coordinate set: {best_coords} with {best_score} correct answers")
+    return best_coords
+
 # ------------------- Evaluate Single Sheet -------------------
 def evaluate_sheet(image_path, answer_key):
     img = cv2.imread(image_path)
     warp = rectify_image(img)
-    extracted = extract_answers(warp)
+    
+    # Try auto-detection first, fall back to manual if it fails
+    try:
+        extracted = extract_answers_auto(warp)
+    except Exception as e:
+        print(f"Auto-detection failed for {image_path}: {e}")
+        extracted = extract_answers(warp)
+    
     subject_scores = {}
     total = 0
     for subj in SUBJECTS:
