@@ -33,7 +33,7 @@ env/
 .streamlit/
 
 # Images / datasets / sheets
-sheets/
+# sheets/
 *.jpg
 *.jpeg
 *.png
