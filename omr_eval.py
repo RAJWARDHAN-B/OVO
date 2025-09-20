@@ -250,11 +250,11 @@ def extract_answers(img):
                 choice_x = x + choice_idx * choice_spacing
                 roi = gray[y:y+bubble_h, choice_x:choice_x+bubble_w]
                 
-                if roi.size == 0:  # Skip if ROI is empty
+                if roi.size == 0 or roi.shape[0] != bubble_h or roi.shape[1] != bubble_w:  # Skip if ROI is empty or wrong size
                     choice_scores.append(0)
                     continue
                     
-                mask = create_circular_mask(bubble_h, bubble_w)
+                mask = create_circular_mask(roi.shape[0], roi.shape[1])
                 _, th = cv2.threshold(roi, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
                 score = np.sum((th==0) & mask) / np.sum(mask) if np.sum(mask) > 0 else 0
                 choice_scores.append(score)
@@ -297,7 +297,7 @@ def evaluate_batch(folder="sheets"):
         if os.path.isdir(set_path):
             key = keyA if "A" in set_folder.upper() else keyB
             for fname in os.listdir(set_path):
-                if fname.lower().endswith((".jpg", ".png")):
+                if fname.lower().endswith((".jpg", ".png", ".jpeg")):
                     res = evaluate_sheet(os.path.join(set_path,fname), key)
                     results.append(res)
     return results
