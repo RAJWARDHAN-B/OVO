@@ -1,0 +1,48 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.pdb
+*.egg
+*.egg-info/
+dist/
+build/
+*.so
+
+# Virtual environments
+venv/
+env/
+.venv/
+.env/
+
+# Packages
+*.egg-info/
+*.eggs/
+
+# Logs
+*.log
+
+# IDEs
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# Streamlit / app
+.streamlit/
+
+# Images / datasets / sheets
+sheets/
+*.jpg
+*.jpeg
+*.png
+*.pdf
+
+# Output files
+results.csv
+*.json
+
+# OS files
+.DS_Store
+Thumbs.db
