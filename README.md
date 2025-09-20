@@ -1,2 +1,1 @@
-# OVO
-OMR Verification &amp; Output
+# OVO-OMR Verification and Output
