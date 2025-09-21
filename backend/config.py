@@ -13,10 +13,16 @@ class Settings:
     DATA_DIR: Path = Path(os.getenv("OVO_DATA_DIR", PROJECT_ROOT / "uploads"))
 
     # Database
-    DATABASE_URL: str = os.getenv(
+    raw_db_url = os.getenv(
         "DATABASE_URL",
         f"sqlite:///{(PROJECT_ROOT / 'ovo.db').as_posix()}",
     )
+    # Normalize Render-style Postgres DSNs
+    if raw_db_url.startswith("postgres://"):
+        raw_db_url = raw_db_url.replace("postgres://", "postgresql+psycopg2://", 1)
+    elif raw_db_url.startswith("postgresql://") and "+psycopg2" not in raw_db_url:
+        raw_db_url = raw_db_url.replace("postgresql://", "postgresql+psycopg2://", 1)
+    DATABASE_URL: str = raw_db_url
 
     # Answer Keys
     KEYS_DIR: Path = Path(os.getenv("OVO_KEYS_DIR", PROJECT_ROOT / "sheets" / "Keys"))

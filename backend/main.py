@@ -40,6 +40,11 @@ def on_startup():
     init_db()
 
 
+@app.get("/healthz")
+def healthz():
+    return {"status": "ok"}
+
+
 @app.post("/upload", response_model=schemas.UploadResponse)
 async def upload_sheets(
     files: List[UploadFile] = File(...),
