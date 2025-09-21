@@ -25,16 +25,28 @@ with tab_upload:
         "Optional: Student IDs (one per line, aligned with files)",
         placeholder="student1\nstudent2\n...",
     )
+    st.caption("You can upload images or capture a photo using your device camera.")
     uploaded_files = st.file_uploader(
         "Select image files (.jpg/.jpeg/.png)", type=["jpg", "jpeg", "png"], accept_multiple_files=True
     )
+    camera_image = st.camera_input("Or capture using camera")
 
     if st.button("Process"):
-        if not uploaded_files:
-            st.warning("Please select at least one file.")
+        files_to_send = []
+        if uploaded_files:
+            files_to_send.extend(uploaded_files)
+        if camera_image is not None:
+            files_to_send.append(camera_image)
+
+        if not files_to_send:
+            st.warning("Please upload or capture at least one image.")
         else:
             student_ids = [s for s in student_ids_text.splitlines() if s.strip()] or None
-            files_payload = [("files", (f.name, f.getvalue(), f.type or "image/jpeg")) for f in uploaded_files]
+            files_payload = []
+            for f in files_to_send:
+                fname = getattr(f, "name", None) or "camera_capture.jpg"
+                ftype = getattr(f, "type", None) or "image/jpeg"
+                files_payload.append(("files", (fname, f.getvalue(), ftype)))
             params = {"set_version": set_version}
             if student_ids:
                 for sid in student_ids:
