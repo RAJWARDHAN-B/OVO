@@ -10,7 +10,7 @@ if not API_BASE:
     try:
         API_BASE = st.secrets["API_BASE"]  # Optional if secrets.toml exists
     except Exception:
-        API_BASE = "http://127.0.0.1:8000"
+        API_BASE = "https://ovo-pa4b.onrender.com"
 
 st.set_page_config(page_title="OMR Evaluation Dashboard", layout="wide")
 st.title("OMR Evaluation System")
