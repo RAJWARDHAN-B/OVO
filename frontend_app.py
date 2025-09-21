@@ -2,8 +2,15 @@ import streamlit as st
 import pandas as pd
 import requests
 from io import BytesIO
+import os
 
-API_BASE = st.secrets.get("API_BASE", "http://127.0.0.1:8000")
+# Resolve API base without requiring a secrets file
+API_BASE = os.getenv("API_BASE")
+if not API_BASE:
+    try:
+        API_BASE = st.secrets["API_BASE"]  # Optional if secrets.toml exists
+    except Exception:
+        API_BASE = "http://127.0.0.1:8000"
 
 st.set_page_config(page_title="OMR Evaluation Dashboard", layout="wide")
 st.title("OMR Evaluation System")
